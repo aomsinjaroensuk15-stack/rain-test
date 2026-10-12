@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ทำนายฝน</title>
+<meta name="theme-color" content="#5AA7E8">
+<meta name="description" content="พยากรณ์ฝนรายชั่วโมง 24 ชั่วโมง พร้อมสรุปอัตโนมัติว่าฝนจะเริ่ม/หยุดเมื่อไหร่">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=1.2">
+</head>
+<body class="t-day-dry">
+<div id="skyA" class="on"></div><div id="skyB"></div>
+<div id="orb">☀️</div>
+<main>
+<h1>🌦️ ทำนายฝน</h1>
+<button id="upd" type="button">กำลังโหลด…</button>
+<div id="note" class="note" hidden></div>
+
+<button id="gps" type="button">📍 ใช้ตำแหน่งของฉัน</button>
+<div class="srow"><input id="q" placeholder="หรือพิมพ์ชื่อที่ เช่น เชียงใหม่" aria-label="ค้นหาสถานที่"><button id="find">ค้นหา</button></div>
+<div id="chips"></div>
+<button id="mtg" type="button">🗺️ หรือแตะเลือกจุดบนแผนที่</button>
+<section id="msec" hidden>
+  <div id="map" role="application" aria-label="แผนที่เลือกตำแหน่ง"></div>
+  <p class="tip">แตะ/คลิกจุดใดก็ได้บนแผนที่เพื่อดูพยากรณ์ของจุดนั้น · ลากและซูมได้</p>
+</section>
+
+<section id="now" hidden>
+  <div class="row1">
+    <div id="nw-icon">⛅</div>
+    <div id="nw-main">
+      <p id="nw-temp">—</p>
+      <p id="nw-label">—</p>
+      <div id="nw-meta">
+        <span>💧 โอกาสตก <b id="nw-pp">—</b></span>
+        <span>🌧 ปริมาณ <b id="nw-mm">—</b></span>
+        <span id="nw-lv" hidden>⚡ ระดับ <b id="nw-lv-b">—</b></span>
+      </div>
+      <p id="nw-range" class="tip">—</p>
+    </div>
+  </div>
+  <p id="nw-sum"></p>
+</section>
+
+<h2 id="dh" hidden>⏱️ 24 ชั่วโมงข้างหน้า <span id="tot"></span></h2>
+<div id="tl"></div>
+
+<p class="fine">พยากรณ์จากโมเดลสภาพอากาศ (Open-Meteo, CC BY 4.0) ความละเอียดหลายกิโลเมตร ไม่ใช่เรดาร์ตรวจจับจริง · ระดับความแรงฝนเป็นค่าประมาณ ยังไม่ได้สอบเทียบกับเกณฑ์ทางการ · พิกัดของคุณถูกส่งตรงไปยัง Open-Meteo/Nominatim เพื่อดึงข้อมูลเท่านั้น เราไม่มีเซิร์ฟเวอร์ของตัวเองและไม่เก็บข้อมูลส่วนตัว</p>
+
+<details id="dbgwrap" hidden><summary>🐞 บันทึกข้อผิดพลาด (ถ้ามี)</summary><div class="box" id="dbg"></div></details>
+</main>
+
+<script>
+'use strict';
+console.info('%cทำนายฝน v1.2 🌦️','color:#3AA0E8');
+const $=i=>document.getElementById(i);
+const API='https://api.open-meteo.com/v1/forecast';
+const BKK='Asia/Bangkok';
+let cur=null,map=null,mk=null,reqId=0;
+
+/* ============ 🐞 error console ฉบับมือถือ ============ */
+function elog(m){try{const w=$('dbgwrap');w.hidden=false;const d=$('dbg');const line=document.createElement('div');
+ line.style.cssText='color:#f87171;font-size:.8rem;padding:.2rem 0;border-bottom:1px dashed rgba(255,90,90,.25)';
+ line.textContent='• '+new Date().toLocaleTimeString('th-TH')+' — '+m;d.appendChild(line)}catch(e){}}
+addEventListener('error',e=>elog('JS: '+e.message+' (บรรทัด '+e.lineno+')'));
+addEventListener('unhandledrejection',e=>elog('Promise: '+((e.reason&&e.reason.message)||e.reason)));
+function guard(fn){return function(){try{const r=fn.apply(this,arguments);if(r&&r.catch)r.catch(e=>{elog((fn.name||'fn')+': '+(e&&e.message||e));note('เกิดข้อผิดพลาด: '+(e&&e.message||e),1)});return r}catch(e){elog((fn.name||'fn')+': '+(e&&e.message||e));note('เกิดข้อผิดพลาด: '+(e&&e.message||e),1)}}}
+function note(t,bad){try{const n=$('note');n.textContent=t;n.className='note'+(bad?' bad':'');n.hidden=!t}catch(e){}}
+function busy(btn,txt){btn.dataset.o=btn.textContent;btn.textContent=txt;btn.disabled=true}
+function idle(btn){btn.textContent=btn.dataset.o||btn.textContent;btn.disabled=false}
+
+/* ============ 🕐 เวลาแบบ Asia/Bangkok (เครื่องอยู่ประเทศไหนก็ถูก) ============ */
+const fH =new Intl.DateTimeFormat('en-GB',{timeZone:BKK,hour:'2-digit',hourCycle:'h23'});
+const fDay=new Intl.DateTimeFormat('en-GB',{timeZone:BKK,day:'numeric'});
+const fDow=new Intl.DateTimeFormat('th-TH',{timeZone:BKK,weekday:'short',day:'numeric',month:'short'});
+const bkkH=t=>+fH.format(new Date(t*1000));           // ชั่วโมง 0-23 (ตัวเลขอารบิก)
+const bkkDay=t=>+fDay.format(new Date(t*1000));        // วันที่ 1-31
+const fmtRange=t=>{const h=bkkH(t);return String(h).padStart(2,'0')+'–'+String((h+1)%24).padStart(2,'0')+' น.'};
+
+/* ============ WMO weathercode ============ */
+const G={clear:[0],partly:[1,2],cloudy:[3],fog:[45,48],drizzle:[51,53,55,56,57],rain:[61,63,65,66,67,80,81,82],snow:[71,73,75,77,85,86],thunder:[95,96,99]};
+const grp=c=>{for(const k in G)if(G[k].includes(c))return k;return 'cloudy'};
+const SKY_ICON={clear:['☀️','🌙'],partly:['🌤️','☁️'],cloudy:['☁️','☁️'],fog:['🌫️','🌫️'],rain:['🌧️','🌧️'],drizzle:['🌦️','🌦️'],snow:['🌨️','🌨️'],thunder:['⛈️','⛈️']};
+const SKY_LABEL={clear:'ฟ้าโล่ง ไม่มีฝน',partly:'มีเมฆบาง ไม่มีฝน',cloudy:'ฟ้าครึ้ม แต่ยังไม่มีฝน',fog:'มีหมอก',snow:'หิมะตก',thunder:'พายุฝนฟ้าคะนอง'};
+
+/* ============ ความเปียก: ใช้ "ปริมาณฝน" เป็นหลัก code เป็นรอง (แก้บั๊ก #3) ============ */
+function wetCat(h){ // คืน 'wet'|'drizzle'|null — ตัดสินจากมิลลิเมตรจริง ไม่ใช่ code
+ if(h.pc!=null&&h.pc>=0.2)return h.pc>=1?'wet':'drizzle';
+ if(h.pp!=null&&h.pp>=60&&h.pc!=null&&h.pc>0)return 'drizzle';
+ return null;
+}
+function catOf(h){ // หมวดสำหรับสรุป/ธีม: เปียกจากมม. แห้งดูจาก code
+ const g=grp(h.code);
+ if(g==='thunder'||g==='snow')return g;
+ const w=wetCat(h);
+ if(w)return w;
+ return(g==='rain'||g==='drizzle')?'cloudy':g; // code ว่าฝนแต่มม.เป็น 0 → ถือว่าครึ้ม
+}
+const isWet=c=>c==='wet'||c==='drizzle'||c==='thunder';
+function iconOf(h){const g=grp(h.code);const dry=!wetCat(h)&&(g==='rain'||g==='drizzle');return(dry?SKY_ICON.cloudy:SKY_ICON[g]||SKY_ICON.cloudy)[h.isday?0:1]}
+
+/* ============ ระดับความแรงฝน (ค่าประมาณ มม./ชม.) ============ */
+function intensity(pc){
+ if(pc==null||pc<0.2)return null;
+ if(pc<1)return['เบา','#60A5FA'];
+ if(pc<3)return['ปานกลาง','#3B82F6'];
+ if(pc<8)return['หนัก','#F97316'];
+ return['หนักมาก','#DC2626'];
+}
+
+/* ============ ธีมท้องฟ้า ============ */
+let skyFlip=false;
+function setTheme(day,wet){
+ try{
+  document.body.className='t-'+(day?'day':'night')+'-'+(wet?'wet':'dry');
+  const next=skyFlip?$('skyA'):$('skyB'),prev=skyFlip?$('skyB'):$('skyA');
+  skyFlip=!skyFlip;next.classList.add('on');prev.classList.remove('on');
+  const orb=$('orb');orb.textContent=day?'☀️':'🌙';orb.classList.toggle('moon',!day);
+  const mt=document.querySelector('meta[name=theme-color]');
+  if(mt)mt.content=day?(wet?'#31465C':'#5AA7E8'):(wet?'#070B16':'#0A0F22');
+ }catch(e){elog('setTheme: '+e.message)}
+}
+
+/* ============ สรุปอัตโนมัติ ============ */
+const NOW_TXT={wet:'ฝนกำลังตก',drizzle:'มีฝนปรอย ๆ',thunder:'มีพายุฝนฟ้าคะนอง',clear:'ฟ้าโล่ง ไม่มีฝน',partly:'ฟ้าใส มีเมฆบาง',cloudy:'ฟ้าครึ้ม แต่ยังไม่มีฝน',fog:'มีหมอก',snow:'หิมะกำลังตก'};
+function summarize(hs){
+ const h0=hs[0],c0=catOf(h0),w0=isWet(c0);
+ let txt=NOW_TXT[c0]||'—';
+ const iv=intensity(h0.pc);
+ if(c0==='wet'&&iv)txt=iv[0]==='หนักมาก'?'ฝนตกหนักมาก':iv[0]==='หนัก'?'ฝนตกหนัก':'ฝนตก';
+ let change=-1;
+ for(let i=1;i<Math.min(hs.length,24);i++){if(isWet(catOf(hs[i]))!==w0){change=i;break}}
+ let s='ตอนนี้'+txt;
+ if(change>0){
+  const t=hs[change].t,hh=String(bkkH(t)).padStart(2,'0');
+  s+=w0?' · ฝนจะหยุดราว '+hh+':00 น.':' · ฝนจะเริ่มราว '+hh+':00 น.';
+  if(bkkDay(t)!==bkkDay(hs[0].t))s+=' (พรุ่งนี้)';
+ }else s+=w0?' · และคาดว่าฝนจะตกต่อเนื่องยาวถึง 24 ชม.':' · ไม่มีฝนถึงพรุ่งนี้เวลานี้เลย';
+ return s;
+}
+
+/* ============ render ============ */
+function render(){
+ if(!cur||!cur.h||!cur.h.time||!cur.h.time.length)return;
+ const H=cur.h,now=Date.now();
+ // หา "ช่วงปัจจุบัน": time[i] <= ตอนนี้ < time[i+1] — ค่าที่เวลา 10:00 คือผลรวมช่วง 09:00–10:00
+ let i0=-1;
+ for(let i=0;i<H.time.length-1;i++){if(H.time[i]*1000<=now&&now<H.time[i+1]*1000){i0=i;break}}
+ const stale=i0<0||(H.time.length-1-i0)<6; // เหลือน้อยกว่า 6 ช่วง = ครึ่งวัน → เก่าเกินไป
+ const start=stale?Math.max(0,H.time.length-24):i0;
+ const hs=[];
+ for(let i=start;i<Math.min(start+24,H.time.length);i++)hs.push({t:H.time[i],pp:H.pp[i],pc:H.pc[i],code:H.code[i],temp:H.temp[i],isday:H.isday[i]});
+ if(!hs.length){note('ยังไม่มีข้อมูลพยากรณ์',1);return}
+ note(stale?'⚠️ ข้อมูลเก่าเกินไป (พยากรณ์ครอบคลุมถึง '+fDow.format(new Date(H.time[H.time.length-1]*1000))+') — เชื่อมต่อเน็ตแล้วแตะบรรทัดอัปเดตเพื่อรีเฟรช':'');
+ setTheme(!!hs[0].isday,isWet(catOf(hs[0])));
+ // การ์ดตอนนี้ (ซ่อนถ้าข้อมูลเก่า — ไม่โกหกว่า "ตอนนี้")
+ $('now').hidden=stale;
+ if(!stale){
+  const h0=hs[0],c0=catOf(h0);
+  $('nw-icon').textContent=iconOf(h0);
+  $('nw-temp').innerHTML=(h0.temp==null?'—':Math.round(h0.temp))+'<small>°C</small>';
+  $('nw-label').textContent=c0==='wet'||c0==='drizzle'?(intensity(h0.pc)?'ฝนตกระดับ'+intensity(h0.pc)[0]:'มีฝน'):(SKY_LABEL[c0]||'—');
+  $('nw-pp').textContent=h0.pp==null?'—':h0.pp+'%';
+  $('nw-mm').textContent=h0.pc==null?'—':h0.pc+' มม.';
+  const iv=intensity(h0.pc);
+  $('nw-lv').hidden=!iv;
+  if(iv){const b=$('nw-lv-b');b.textContent=iv[0];b.style.color=iv[1]}
+  $('nw-range').textContent='⏱ ช่วง '+fmtRange(h0.t)+' (ค่าฝนคือผลรวมในช่วงเวลานี้)';
+  $('nw-sum').textContent=summarize(hs);
+ }
+ // ไทม์ไลน์
+ $('dh').hidden=false;
+ let tot=0;hs.forEach(h=>{tot+=h.pc||0});
+ $('tot').textContent='รวม ~'+Math.round(tot)+' มม.';
+ const day0=bkkDay(hs[0].t);
+ $('tl').replaceChildren(...hs.map((h,i)=>{
+  const d=document.createElement('div'),c=catOf(h);
+  d.className='h '+(!stale&&i===0?'now ':'')+(isWet(c)?'wet':'');
+  const dt=new Date(h.t*1000);
+  const tm=document.createElement('time');
+  tm.textContent=(bkkDay(h.t)!==day0?'พรุ่งนี้ ':'')+fmtRange(h.t);
+  const ic=document.createElement('div');ic.className='ic';ic.textContent=iconOf(h);
+  const tp=document.createElement('div');tp.className='tp';tp.textContent=h.temp==null?'—':Math.round(h.temp)+'°';
+  const pp=document.createElement('span');
+  if(h.pp!=null){pp.className='pp '+(h.pp>=60?'hi':h.pp>=30?'md':'lo');pp.textContent='💧'+h.pp+'%'}
+  const mm=document.createElement('div');mm.className='mm';mm.textContent=(h.pc!=null&&h.pc>0)?h.pc+' มม.':'';
+  d.append(tm,ic,tp,pp,mm);d.style.animationDelay=(i*0.035)+'s';
+  const iv=intensity(h.pc);
+  if(iv)d.title='ระดับฝน: '+iv[0];
+  return d;
+ }));
+ if(!stale)requestAnimationFrame(()=>{$('tl').scrollTo({left:0,behavior:'auto'})});
+ const m=(Date.now()-cur.ts)/6e4,ago=m<1?'เมื่อสักครู่':m<60?Math.round(m)+' นาทีที่แล้ว':Math.floor(m/60)+' ชม. '+Math.round(m%60)+' นาทีที่แล้ว';
+ $('upd').textContent='📍 '+(cur.name||'จุดที่เลือก')+' · อัปเดต '+ago+(stale?' · ⚠️ ข้อมูลเก่า':'')+' (แตะเพื่อรีเฟรช)';
+}
+
+/* ============ load (มี reqId กัน race + scroll เฉพาะตอนผู้ใช้เลือกจุดเอง) ============ */
+async function load(lat,lon,name,scroll){
+ const my=++reqId;
+ if(map){try{if(mk)mk.setLatLng([lat,lon]);else mk=L.circleMarker([lat,lon],{radius:9,color:'#fff',weight:3,fillColor:'#1D6FD1',fillOpacity:1}).addTo(map)}catch(e){}}
+ $('upd').classList.add('spin');
+ try{
+  const u=API+'?latitude='+lat+'&longitude='+lon+'&timezone=Asia%2FBangkok&timeformat=unixtime&forecast_days=2&hourly=precipitation_probability,precipitation,weathercode,temperature_2m,cloud_cover,is_day';
+  const r=await fetch(u);
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const j=await r.json(),H=j.hourly;
+  if(!H||!H.time||H.time.length<10)throw new Error('ข้อมูลว่าง');
+  if(my!==reqId)return my; // มีคำขอใหม่กว่า ทิ้งผลนี้
+  cur={lat,lon,name,ts:Date.now(),h:{time:H.time,pp:H.precipitation_probability,pc:H.precipitation,code:H.weathercode,temp:H.temperature_2m,cloud:H.cloud_cover,isday:H.is_day}};
+  try{localStorage.setItem('raindata',JSON.stringify(cur));localStorage.setItem('rainloc',JSON.stringify({lat,lon,name}))}catch(e){}
+  render();
+  if(scroll)scrollTo({top:0,behavior:'smooth'});
+ }catch(e){
+  if(my!==reqId)return my;
+  elog('load: '+e.message);
+  if(cur)note('อัปเดตไม่สำเร็จ ('+e.message+') — แสดงข้อมูลล่าสุดที่เก็บไว้',1);
+  else note('ดึงข้อมูลไม่ได้ ('+e.message+') ตรวจสัญญาณเน็ตแล้วลองอีกครั้ง',1);
+ }
+ $('upd').classList.remove('spin');
+ return my;
+}
+
+/* ============ ปุ่ม GPS (scroll=true เฉพาะตรงนี้) ============ */
+$('gps').onclick=guard(function onGps(){
+ if(!navigator.geolocation){note('เบราว์เซอร์นี้ไม่รองรับ GPS',1);return}
+ busy($('gps'),'📡 กำลังหาตำแหน่ง…');
+ navigator.geolocation.getCurrentPosition(p=>{
+  idle($('gps'));
+  load(p.coords.latitude,p.coords.longitude,'ตำแหน่งของคุณ',true);
+ },e=>{
+  idle($('gps'));
+  note(e.code===1?'🚫 ถูกบล็อกสิทธิ์ตำแหน่ง — แตะ 🔒 หน้า URL → Permissions → Location → Allow':e.code===2?'📵 ปิด GPS ของเครื่องอยู่ — เปิด Location services ก่อน':'⏱️ หาตำแหน่งไม่เจอใน 15 วิ ลองอีกครั้ง',1);
+ },{timeout:15000,maximumAge:600000});
+});
+
+/* ============ ค้นหา ============ */
+$('find').onclick=guard(async function onFind(){
+ const q=$('q').value.trim();
+ if(!q){note('พิมพ์ชื่อที่ต้องการค้นหาก่อน เช่น "เชียงใหม่"');$('q').focus();return}
+ busy($('find'),'…');
+ try{
+  const r=await fetch('https://geocoding-api.open-meteo.com/v1/search?count=4&language=th&name='+encodeURIComponent(q));
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const j=await r.json();
+  if(!j.results||!j.results.length){note('ค้นหา "'+q+'" ไม่เจอ ลองชื่อใกล้เคียง',1);$('chips').replaceChildren();return}
+  note('');
+  $('chips').replaceChildren(...j.results.map(p=>{
+   const b=document.createElement('button');b.type='button';
+   b.textContent='📍 '+p.name+(p.admin1?' · '+p.admin1:'');
+   b.onclick=guard(()=>{$('chips').replaceChildren();load(p.latitude,p.longitude,p.name,true)});
+   return b;
+  }));
+ }catch(e){note('ค้นหาไม่ได้ ('+e.message+') ลองอีกครั้ง',1)}
+ idle($('find'));
+});
+$('q').addEventListener('keydown',e=>{if(e.key==='Enter')$('find').click()});
+
+/* ============ แผนที่ (Leaflet lazy-load ตอนกดครั้งแรก) ============ */
+let Lp=null;
+function ensureLeaflet(){
+ if(window.L)return Promise.resolve();
+ if(Lp)return Lp;
+ Lp=new Promise((res,rej)=>{
+  const c=document.createElement('link');c.rel='stylesheet';
+  c.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';document.head.appendChild(c);
+  const s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+  s.onload=res;s.onerror=()=>{Lp=null;rej(new Error('โหลดไฟล์แผนที่ไม่สำเร็จ'))};
+  document.body.appendChild(s);
+ });
+ return Lp;
+}
+$('mtg').onclick=guard(async function onMap(){
+ const sec=$('msec');
+ if(!sec.hidden){sec.hidden=true;$('mtg').textContent='🗺️ หรือแตะเลือกจุดบนแผนที่';return}
+ busy($('mtg'),'⏳ กำลังเปิดแผนที่…');
+ try{await ensureLeaflet()}catch(e){idle($('mtg'));note('🗺️ '+e.message+' — ตรวจเน็ตแล้วกดใหม่',1);return}
+ idle($('mtg'));
+ sec.hidden=false;
+ $('mtg').textContent='🗺️ ซ่อนแผนที่';
+ setTimeout(()=>{
+  try{
+   if(!map){
+    map=L.map('map').setView(cur&&cur.lat?[cur.lat,cur.lon]:[13.2,101],cur&&cur.lat?10:6);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(map);
+    if(cur&&cur.lat)mk=L.circleMarker([cur.lat,cur.lon],{radius:9,color:'#fff',weight:3,fillColor:'#1D6FD1',fillOpacity:1}).addTo(map);
+    map.on('click',guard(async e=>{
+     const{lat,lng}=e.latlng;
+     try{if(mk)mk.setLatLng([lat,lng]);else mk=L.circleMarker([lat,lng],{radius:9,color:'#fff',weight:3,fillColor:'#1D6FD1',fillOpacity:1}).addTo(map)}catch(err){}
+     sec.hidden=true;$('mtg').textContent='🗺️ หรือแตะเลือกจุดบนแผนที่';
+     const t=await load(lat,lng,'จุดที่เลือกบนแผนที่',true); // รอ load เสร็จก่อน แล้วค่อย reverse geocode (แก้ race)
+     if(t!==reqId)return;
+     try{
+      const r=await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat='+lat+'&lon='+lng+'&accept-language=th&zoom=12');
+      if(!r.ok)return;
+      const j=await r.json();
+      if(j&&j.display_name&&cur&&Math.abs(cur.lat-lat)<.001&&Math.abs(cur.lon-lng)<.001){
+       cur.name=j.display_name.split(',').slice(0,2).join(' · ');render();
+       try{localStorage.setItem('rainloc',JSON.stringify({lat,lon:lng,name:cur.name}))}catch(e){}
+      }
+     }catch(e){}
+    }));
+   }else map.invalidateSize();
+  }catch(e){elog('map: '+e.message);note('เปิดแผนที่ไม่สำเร็จ ('+e.message+')',1)}
+ },60);
+});
+
+/* ============ รีเฟรช (ไม่ scroll) ============ */
+$('upd').onclick=guard(function onRefresh(){
+ if(!cur||!cur.lat){note('ยังไม่ได้เลือกตำแหน่ง — กด 📍 หรือค้นหาหรือแผนที่ก่อน');return}
+ load(cur.lat,cur.lon,cur.name,false);
+});
+
+/* ============ init + auto-refresh (ไม่ scroll กระชากจอแล้ว) ============ */
+(function init(){
+ try{const s=JSON.parse(localStorage.getItem('raindata'));if(s&&s.h&&Array.isArray(s.h.time)&&s.h.time.length>10)cur=s}catch(e){elog('อ่าน cache: '+e.message)}
+ if(cur)render();else $('upd').textContent='📍 เลือกตำแหน่งเพื่อเริ่ม (กดปุ่มด้านล่าง)';
+ try{
+  const L2=JSON.parse(localStorage.getItem('rainloc'));
+  if(L2&&L2.lat&&(!cur||Date.now()-cur.ts>6e5))load(L2.lat,L2.lon,L2.name,false);
+ }catch(e){}
+})();
+setInterval(()=>{if(cur&&cur.lat&&document.visibilityState==='visible'&&Date.now()-cur.ts>6e5)load(cur.lat,cur.lon,cur.name,false)},6e5);
+
+/* ============ Service Worker (PWA) ============ */
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')){
+ navigator.serviceWorker.register('sw.js').then(r=>r&&setInterval(()=>r.update(),36e5)).catch(e=>elog('SW: '+e.message));
+}
+</script>
+</body>
+</html>
