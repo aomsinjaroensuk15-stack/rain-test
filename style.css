@@ -226,3 +226,39 @@ button:disabled{opacity:.65;cursor:progress}
 #nw-lv b{text-shadow:0 0 10px currentColor}
 /* แถบช่วงเวลาในการ์ดไทม์ไลน์ */
 .h time{white-space:nowrap;font-size:.72rem}
+
+/* ============================ 🃏 Phase 2: การ์ดตัดสิน + ตาราง 7 วัน ============================ */
+.pcard{display:flex;align-items:center;gap:1rem;margin:.8rem 0;padding:1.05rem 1.2rem;border-radius:var(--r);
+  background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  animation:rise .55s cubic-bezier(.2,.8,.2,1) both}
+.pcard.lv-ok{border-color:color-mix(in srgb,#34D399 45%,transparent);box-shadow:var(--shadow),0 0 18px rgba(52,211,153,.18)}
+.pcard.lv-mid{border-color:color-mix(in srgb,var(--accent) 45%,transparent);box-shadow:var(--shadow),0 0 18px rgba(80,170,255,.16)}
+.pcard.lv-bad{border-color:color-mix(in srgb,#F97316 50%,transparent);box-shadow:var(--shadow),0 0 20px rgba(249,115,22,.25)}
+.pcard.warn{border-color:color-mix(in srgb,#DC2626 55%,transparent);
+  background:linear-gradient(135deg,color-mix(in srgb,#DC2626 14%,var(--panel)),var(--panel));
+  box-shadow:var(--shadow),0 0 24px rgba(220,38,38,.3)}
+.pcard.warn .pc-ic{animation:iconShake 1.2s ease-in-out infinite}
+@keyframes iconShake{0%,100%{transform:rotate(0)}20%{transform:rotate(-12deg)}40%{transform:rotate(10deg)}60%{transform:rotate(-7deg)}80%{transform:rotate(5deg)}}
+.pc-ic{font-size:2.4rem;line-height:1;filter:drop-shadow(0 3px 10px rgba(0,20,60,.3))}
+.pcard.warn .pc-ic{filter:drop-shadow(0 0 12px rgba(255,120,80,.8))}
+.pc-main{flex:1;min-width:0}
+.pc-main h3{margin:0;font-size:1.05rem;font-weight:800;line-height:1.35}
+.pc-sub{margin:.25rem 0 0;font-size:.83rem;color:var(--mute)}
+
+/* ตาราง 7 วัน */
+#wkh span{font-size:.82rem;color:var(--mute);font-weight:600}
+#wk{display:flex;gap:.5rem;overflow-x:auto;padding:.8rem .6rem 1rem;margin:.3rem -.6rem 0;
+  scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;scrollbar-width:thin;
+  scrollbar-color:color-mix(in srgb,var(--accent) 60%,transparent) transparent}
+#wk::-webkit-scrollbar{height:6px}
+#wk::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--accent) 45%,transparent);border-radius:999px}
+.dw{width:4.9rem}
+.dw.we{border-color:color-mix(in srgb,var(--accent3,#F472B6) 40%,var(--line));
+  background:linear-gradient(180deg,color-mix(in srgb,var(--accent2) 14%,var(--panel)),var(--panel))}
+.dw-t{display:flex;flex-direction:column;align-items:center;font-size:.8rem;font-weight:800;line-height:1.3}
+.dw-t .dw-d{font-size:.68rem;font-weight:600;color:var(--mute)}
+.dw.we .dw-t{color:var(--accent)}
+.dw .tp small{font-size:.7rem;color:var(--mute);font-weight:600}
+.dw .hr{font-size:.68rem;color:var(--accent);font-weight:700;min-height:1em}
+.dw.wet .hr{color:#F97316}

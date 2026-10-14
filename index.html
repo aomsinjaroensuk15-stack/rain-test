@@ -51,7 +51,34 @@
 <h2 id="dh" hidden>⏱️ 24 ชั่วโมงข้างหน้า <span id="tot"></span></h2>
 <div id="tl"></div>
 
-<p class="fine">พยากรณ์จากโมเดลสภาพอากาศ (Open-Meteo, CC BY 4.0) ความละเอียดหลายกิโลเมตร ไม่ใช่เรดาร์ตรวจจับจริง · ระดับความแรงฝนเป็นค่าประมาณ ยังไม่ได้สอบเทียบกับเกณฑ์ทางการ · พิกัดของคุณถูกส่งตรงไปยัง Open-Meteo/Nominatim เพื่อดึงข้อมูลเท่านั้น เราไม่มีเซิร์ฟเวอร์ของตัวเองและไม่เก็บข้อมูลส่วนตัว</p>
+<section id="umb" class="pcard" hidden>
+  <div class="pc-ic" id="umb-ic">☂️</div>
+  <div class="pc-main">
+    <h3 id="umb-t">—</h3>
+    <p id="umb-r" class="pc-sub">—</p>
+  </div>
+</section>
+
+<section id="best" class="pcard" hidden>
+  <div class="pc-ic">🌤️</div>
+  <div class="pc-main">
+    <h3 id="best-t">—</h3>
+    <p id="best-r" class="pc-sub">—</p>
+  </div>
+</section>
+
+<section id="warn" class="pcard warn" hidden>
+  <div class="pc-ic">⚠️</div>
+  <div class="pc-main">
+    <h3 id="warn-t">—</h3>
+    <p id="warn-r" class="pc-sub">—</p>
+  </div>
+</section>
+
+<h2 id="wkh" hidden>📅 7 วันข้างหน้า <span id="wk-sub"></span></h2>
+<div id="wk"></div>
+
+<p class="fine">พยากรณ์จากโมเดลสภาพอากาศ (Open-Meteo, CC BY 4.0) ความละเอียดหลายกิโลเมตร ไม่ใช่เรดาร์ตรวจจับจริง · ระดับความแรงฝน/คำแนะนำพกร่มเป็นค่าประมาณ ยังไม่ได้สอบเทียบกับเกณฑ์ทางการ · พิกัดของคุณถูกส่งตรงไปยัง Open-Meteo/Nominatim เพื่อดึงข้อมูลเท่านั้น เราไม่มีเซิร์ฟเวอร์ของตัวเองและไม่เก็บข้อมูลส่วนตัว</p>
 
 <details id="dbgwrap" hidden><summary>🐞 บันทึกข้อผิดพลาด (ถ้ามี)</summary><div class="box" id="dbg"></div></details>
 </main>
@@ -196,8 +223,79 @@ function render(){
   return d;
  }));
  if(!stale)requestAnimationFrame(()=>{$('tl').scrollTo({left:0,behavior:'auto'})});
+ if(!stale)renderPhase2(hs);else hidePhase2();
  const m=(Date.now()-cur.ts)/6e4,ago=m<1?'เมื่อสักครู่':m<60?Math.round(m)+' นาทีที่แล้ว':Math.floor(m/60)+' ชม. '+Math.round(m%60)+' นาทีที่แล้ว';
  $('upd').textContent='📍 '+(cur.name||'จุดที่เลือก')+' · อัปเดต '+ago+(stale?' · ⚠️ ข้อมูลเก่า':'')+' (แตะเพื่อรีเฟรช)';
+}
+
+/* ============ Phase 2: ควรพกร่มไหม / ช่วงดีสุด / เตือนหนักมาก / 7 วัน ============ */
+function hidePhase2(){['umb','best','warn','wkh','wk'].forEach(i=>{$(i).hidden=true})}
+function renderPhase2(hs){
+ // ---- ☂️ ควรพกร่มไหม: ดู 3 ช่วงข้างหน้า ----
+ const s3=hs.slice(0,3);
+ const heavyU=s3.some(h=>(h.pc!=null&&h.pc>=3)||(h.pp!=null&&h.pp>=70&&h.pc!=null&&h.pc>=1));
+ const wetU=s3.some(h=>wetCat(h)!=null);
+ const worst=s3.reduce((a,b)=>((b.pp||0)>(a.pp||0)?b:a),s3[0]);
+ const umb=$('umb');umb.hidden=false;
+ umb.className='pcard '+(heavyU?'lv-bad':wetU?'lv-mid':'lv-ok');
+ $('umb-ic').textContent=heavyU?'⛈️':wetU?'☂️':'🌤️';
+ $('umb-t').textContent=heavyU?'พกร่มแข็งแรง หรือเลื่อนออกนอกบ้าน':wetU?'ควรพกร่ม':'ไม่ต้องพกร่ม';
+ $('umb-r').textContent=(wetU||heavyU)?('เหตุผล: ช่วง '+fmtRange(worst.t)+' โอกาสตก '+(worst.pp==null?'—':worst.pp+'%')+' ปริมาณ '+(worst.pc==null?'—':worst.pc+' มม.')):'3 ชม. ข้างหน้าไม่มีฝน สบาย ๆ';
+ // ---- 🌤 ช่วงไหนออกไปข้างนอกดี: หาช่วงแห้งยาวสุดของวันนี้ ----
+ const day0=bkkDay(hs[0].t),todaySlots=hs.filter(h=>bkkDay(h.t)===day0);
+ let bestRun=null,run=null;
+ todaySlots.forEach(h=>{if(!isWet(catOf(h))){if(!run)run={s:h.t,n:0,mm:0};run.n++;run.mm+=h.pc||0}else{if(run&&(!bestRun||run.n>bestRun.n))bestRun=run;run=null}});
+ if(run&&(!bestRun||run.n>bestRun.n))bestRun=run;
+ const noRainToday=todaySlots.length>0&&!todaySlots.some(h=>(h.pc||0)>0);
+ const best=$('best');best.hidden=false;
+ if(noRainToday){best.className='pcard lv-ok';$('best-t').textContent='ทั้งวันนี้ไม่มีฝน';$('best-r').textContent='ออกไปข้างนอกเมื่อไหร่ก็สบาย ๆ'}
+ else if(bestRun&&bestRun.n>=2){best.className='pcard lv-ok';
+  const endT=(bestRun.s+bestRun.n*36e5);
+  $('best-t').textContent='ช่วงดีที่สุด: '+fmtRange(bestRun.s)+' ถึง '+String(bkkH(endT)).padStart(2,'0')+':00 น.';
+  $('best-r').textContent='แห้งยาวต่อเนื่อง '+bestRun.n+' ชม. เหมาะกับการออกไปข้างนอก';}
+ else if(bestRun){best.className='pcard lv-mid';$('best-t').textContent='มีช่วงแห้งสั้น ๆ เท่านั้นวันนี้';$('best-r').textContent='ถ้าจำเป็นต้องออกไป ช่วง '+fmtRange(bestRun.s)+' ยังพอไหว';}
+ else{const light=todaySlots.reduce((a,b)=>((b.pc||0)<(a.pc||0)?b:a),todaySlots[0]);best.className='pcard lv-mid';
+  $('best-t').textContent='วันนี้แทบไม่มีช่วงแห้งเลย';
+  $('best-r').textContent='ช่วงที่เบาที่สุด: '+fmtRange(light.t)+' ('+(light.pc||0)+' มม.) — ถ้าไม่จำเป็นเลื่อนเป็นวันพรุ่งนี้ดีกว่า';}
+ // ---- ⚠️ เตือนฝนหนักมาก (≥8 มม./ชม.) ใน 24 ชม. ----
+ const warn=$('warn');
+ if(hs.some(h=>(h.pc||0)>=8)){
+  warn.hidden=false;
+  const ranges=[];let R=null;
+  hs.forEach(h=>{if((h.pc||0)>=8){if(!R)R={s:h.t,n:0,mm:0};R.n++;R.mm+=h.pc||0}else{if(R){ranges.push(R);R=null}}});
+  if(R)ranges.push(R);
+  ranges.sort((a,b)=>b.mm-a.mm);const top=ranges[0];
+  $('warn-t').textContent='⚠️ ฝนหนักมากช่วง '+fmtRange(top.s)+' ถึง '+String(bkkH(top.s+top.n*36e5)).padStart(2,'0')+':00 น.';
+  $('warn-r').textContent='ปริมาณสูงสุด '+Math.round(Math.max(...hs.map(h=>h.pc||0))*10)/10+' มม./ชม. — ระวังอันตรายถ้าขี่มอเตอร์ไซค์หรืออยู่กลางแจ้ง'+(ranges.length>1?(' · พบอีก '+(ranges.length-1)+' ช่วงใน 24 ชม.'):'');
+ }else warn.hidden=true;
+ // ---- 📅 7 วัน (ตาราง 7 คอลัมน์) ----
+ const wk=$('wk'),wkh=$('wkh');
+ if(!cur.d||!cur.d.time||!cur.d.time.length){wk.replaceChildren();wkh.hidden=true;return}
+ wkh.hidden=false;
+ const D=cur.d;
+ let wetDays=0,mm7=0;
+ for(let i=0;i<D.time.length;i++){if((D.sum[i]||0)>0)wetDays++;mm7+=D.sum[i]||0}
+ $('wk-sub').textContent='ฝนรวม ~'+Math.round(mm7)+' มม. · มีฝน '+wetDays+' จาก 7 วัน';
+ // นับชั่วโมงฝนจากข้อมูลรายชั่วโมง (pc>=0.2)
+ const cnt={};
+ for(let i=0;i<cur.h.time.length;i++){if((cur.h.pc[i]||0)>=0.2)cnt[bkkDay(cur.h.time[i])]=(cnt[bkkDay(cur.h.time[i])]||0)+1}
+ const fDow2=new Intl.DateTimeFormat('th-TH',{timeZone:BKK,weekday:'short'});
+ wk.replaceChildren(...D.time.map((t,i)=>{
+  const d=document.createElement('div');
+  const dowS=fDow2.format(new Date(t*1000));
+  const we=(dowS==='ส.'||dowS==='อา.');
+  d.className='h dw'+(we?' we':'')+((D.sum[i]||0)>=10?' wet':'');
+  const dow=document.createElement('div');dow.className='dw-t';dow.textContent=i===0?'วันนี้':i===1?'พรุ่งนี้':dowS;
+  const dn=document.createElement('span');dn.className='dw-d';dn.textContent=+fDay.format(new Date(t*1000));dow.appendChild(dn);
+  const ic=document.createElement('div');ic.className='ic';ic.textContent=SKY_ICON[grp(D.code[i])?grp(D.code[i]):'cloudy'][0];
+  const tp=document.createElement('div');tp.className='tp';tp.innerHTML=(D.tmax[i]==null?'—':Math.round(D.tmax[i]))+'°<small> / '+(D.tmin[i]==null?'—':Math.round(D.tmin[i]))+'°</small>';
+  const pp=document.createElement('span');
+  if(D.pp[i]!=null){pp.className='pp '+(D.pp[i]>=60?'hi':D.pp[i]>=30?'md':'lo');pp.textContent='💧'+D.pp[i]+'%'}
+  const mm=document.createElement('div');mm.className='mm';mm.textContent=(D.sum[i]!=null&&D.sum[i]>0)?D.sum[i]+' มม.':'';
+  const hr=document.createElement('div');hr.className='hr';hr.textContent=(cnt[+fDay.format(new Date(t*1000))]||0)>0?('☔'+(cnt[+fDay.format(new Date(t*1000))]||0)+' ชม.'):'';
+  d.append(dow,ic,tp,pp,mm,hr);d.style.animationDelay=(i*0.04)+'s';
+  return d;
+ }));
 }
 
 /* ============ load (มี reqId กัน race + scroll เฉพาะตอนผู้ใช้เลือกจุดเอง) ============ */
@@ -206,13 +304,20 @@ async function load(lat,lon,name,scroll){
  if(map){try{if(mk)mk.setLatLng([lat,lon]);else mk=L.circleMarker([lat,lon],{radius:9,color:'#fff',weight:3,fillColor:'#1D6FD1',fillOpacity:1}).addTo(map)}catch(e){}}
  $('upd').classList.add('spin');
  try{
-  const u=API+'?latitude='+lat+'&longitude='+lon+'&timezone=Asia%2FBangkok&timeformat=unixtime&forecast_days=2&hourly=precipitation_probability,precipitation,weathercode,temperature_2m,cloud_cover,is_day';
-  const r=await fetch(u);
-  if(!r.ok)throw new Error('HTTP '+r.status);
-  const j=await r.json(),H=j.hourly;
+  const base='?latitude='+lat+'&longitude='+lon+'&timezone=Asia%2FBangkok&timeformat=unixtime&';
+  const [r1,r2]=await Promise.all([
+   fetch(API+base+'forecast_days=7&hourly=precipitation_probability,precipitation,weathercode,temperature_2m,cloud_cover,is_day'),
+   fetch(API+base+'forecast_days=7&daily=weathercode,precipitation_sum,precipitation_probability_max,temperature_2m_max,temperature_2m_min')]);
+  if(!r1.ok)throw new Error('HTTP '+r1.status);
+  const j1=await r1.json(),H=j1.hourly;
   if(!H||!H.time||H.time.length<10)throw new Error('ข้อมูลว่าง');
-  if(my!==reqId)return my; // มีคำขอใหม่กว่า ทิ้งผลนี้
-  cur={lat,lon,name,ts:Date.now(),h:{time:H.time,pp:H.precipitation_probability,pc:H.precipitation,code:H.weathercode,temp:H.temperature_2m,cloud:H.cloud_cover,isday:H.is_day}};
+  let D=null;
+  if(r2.ok){try{const j2=await r2.json();const Dd=j2.daily;
+   if(Dd&&Dd.time)D={time:Dd.time,code:Dd.weathercode,sum:Dd.precipitation_sum,pp:Dd.precipitation_probability_max,tmax:Dd.temperature_2m_max,tmin:Dd.temperature_2m_min}}catch(e){}}
+  if(my!==reqId)return my;
+  cur={lat,lon,name,ts:Date.now(),
+   h:{time:H.time,pp:H.precipitation_probability,pc:H.precipitation,code:H.weathercode,temp:H.temperature_2m,cloud:H.cloud_cover,isday:H.is_day},
+   d:D};
   try{localStorage.setItem('raindata',JSON.stringify(cur));localStorage.setItem('rainloc',JSON.stringify({lat,lon,name}))}catch(e){}
   render();
   if(scroll)scrollTo({top:0,behavior:'smooth'});
