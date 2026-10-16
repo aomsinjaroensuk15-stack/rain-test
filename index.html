@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1.2">
+<link rel="stylesheet" href="style.css?v=1.4">
 </head>
 <body class="t-day-dry">
 <div id="skyA" class="on"></div><div id="skyB"></div>
@@ -89,7 +89,7 @@ console.info('%cทำนายฝน v1.2 🌦️','color:#3AA0E8');
 const $=i=>document.getElementById(i);
 const API='https://api.open-meteo.com/v1/forecast';
 const BKK='Asia/Bangkok';
-let cur=null,map=null,mk=null,reqId=0;
+let cur=null,map=null,mk=null,reqId=0,wantScroll=false;
 
 /* ============ 🐞 error console ฉบับมือถือ ============ */
 function elog(m){try{const w=$('dbgwrap');w.hidden=false;const d=$('dbg');const line=document.createElement('div');
@@ -108,7 +108,7 @@ const fDay=new Intl.DateTimeFormat('en-GB',{timeZone:BKK,day:'numeric'});
 const fDow=new Intl.DateTimeFormat('th-TH',{timeZone:BKK,weekday:'short',day:'numeric',month:'short'});
 const bkkH=t=>+fH.format(new Date(t*1000));           // ชั่วโมง 0-23 (ตัวเลขอารบิก)
 const bkkDay=t=>+fDay.format(new Date(t*1000));        // วันที่ 1-31
-const fmtRange=t=>{const h=bkkH(t);return String(h).padStart(2,'0')+'–'+String((h+1)%24).padStart(2,'0')+' น.'};
+const fmtRange=t=>{const h=bkkH(t);return String((h+23)%24).padStart(2,'0')+'–'+String(h).padStart(2,'0')+' น.'};
 
 /* ============ WMO weathercode ============ */
 const G={clear:[0],partly:[1,2],cloudy:[3],fog:[45,48],drizzle:[51,53,55,56,57],rain:[61,63,65,66,67,80,81,82],snow:[71,73,75,77,85,86],thunder:[95,96,99]};
@@ -142,10 +142,12 @@ function intensity(pc){
 }
 
 /* ============ ธีมท้องฟ้า ============ */
-let skyFlip=false;
+let skyFlip=false,lastTheme='';
 function setTheme(day,wet){
  try{
-  document.body.className='t-'+(day?'day':'night')+'-'+(wet?'wet':'dry');
+  const cls='t-'+(day?'day':'night')+'-'+(wet?'wet':'dry');
+  if(cls===lastTheme)return;lastTheme=cls;
+  document.body.className=cls;
   const next=skyFlip?$('skyA'):$('skyB'),prev=skyFlip?$('skyB'):$('skyA');
   skyFlip=!skyFlip;next.classList.add('on');prev.classList.remove('on');
   const orb=$('orb');orb.textContent=day?'☀️':'🌙';orb.classList.toggle('moon',!day);
@@ -165,7 +167,7 @@ function summarize(hs){
  for(let i=1;i<Math.min(hs.length,24);i++){if(isWet(catOf(hs[i]))!==w0){change=i;break}}
  let s='ตอนนี้'+txt;
  if(change>0){
-  const t=hs[change].t,hh=String(bkkH(t)).padStart(2,'0');
+  const t=hs[change].t,hh=String((bkkH(t)+23)%24).padStart(2,'0');
   s+=w0?' · ฝนจะหยุดราว '+hh+':00 น.':' · ฝนจะเริ่มราว '+hh+':00 น.';
   if(bkkDay(t)!==bkkDay(hs[0].t))s+=' (พรุ่งนี้)';
  }else s+=w0?' · และคาดว่าฝนจะตกต่อเนื่องยาวถึง 24 ชม.':' · ไม่มีฝนถึงพรุ่งนี้เวลานี้เลย';
@@ -179,12 +181,14 @@ function render(){
  // หา "ช่วงปัจจุบัน": time[i] <= ตอนนี้ < time[i+1] — ค่าที่เวลา 10:00 คือผลรวมช่วง 09:00–10:00
  let i0=-1;
  for(let i=0;i<H.time.length-1;i++){if(H.time[i]*1000<=now&&now<H.time[i+1]*1000){i0=i;break}}
- const stale=i0<0||(H.time.length-1-i0)<6; // เหลือน้อยกว่า 6 ช่วง = ครึ่งวัน → เก่าเกินไป
+ const age=Date.now()-cur.ts;
+ const stale=i0<0||age>864e5;  // ไม่มีช่วงปัจจุบัน หรือข้อมูลอายุเกิน 24 ชม. → ซ่อนการ์ด "ตอนนี้"
+ const aged=age>216e5;          // เกิน 6 ชม. → เตือนให้รีเฟรช
  const start=stale?Math.max(0,H.time.length-24):i0;
  const hs=[];
  for(let i=start;i<Math.min(start+24,H.time.length);i++)hs.push({t:H.time[i],pp:H.pp[i],pc:H.pc[i],code:H.code[i],temp:H.temp[i],isday:H.isday[i]});
  if(!hs.length){note('ยังไม่มีข้อมูลพยากรณ์',1);return}
- note(stale?'⚠️ ข้อมูลเก่าเกินไป (พยากรณ์ครอบคลุมถึง '+fDow.format(new Date(H.time[H.time.length-1]*1000))+') — เชื่อมต่อเน็ตแล้วแตะบรรทัดอัปเดตเพื่อรีเฟรช':'');
+ note(aged?'⚠️ ข้อมูลอายุ '+(age<864e5?Math.round(age/36e5)+' ชม.':Math.round(age/864e5)+' วัน')+'แล้ว — เชื่อมต่อเน็ตแล้วแตะบรรทัดอัปเดตเพื่อรีเฟรช':'');
  setTheme(!!hs[0].isday,isWet(catOf(hs[0])));
  // การ์ดตอนนี้ (ซ่อนถ้าข้อมูลเก่า — ไม่โกหกว่า "ตอนนี้")
  $('now').hidden=stale;
@@ -222,10 +226,10 @@ function render(){
   if(iv)d.title='ระดับฝน: '+iv[0];
   return d;
  }));
- if(!stale)requestAnimationFrame(()=>{$('tl').scrollTo({left:0,behavior:'auto'})});
+ if(wantScroll){requestAnimationFrame(()=>{$('tl').scrollTo({left:0,behavior:'auto'})});wantScroll=false}
  if(!stale)renderPhase2(hs);else hidePhase2();
  const m=(Date.now()-cur.ts)/6e4,ago=m<1?'เมื่อสักครู่':m<60?Math.round(m)+' นาทีที่แล้ว':Math.floor(m/60)+' ชม. '+Math.round(m%60)+' นาทีที่แล้ว';
- $('upd').textContent='📍 '+(cur.name||'จุดที่เลือก')+' · อัปเดต '+ago+(stale?' · ⚠️ ข้อมูลเก่า':'')+' (แตะเพื่อรีเฟรช)';
+ $('upd').textContent='📍 '+(cur.name||'จุดที่เลือก')+' · อัปเดต '+ago+(aged?' · ⚠️ อายุ '+(age<864e5?Math.round(age/36e5)+' ชม.':Math.round(age/864e5)+' วัน'):'')+(stale?' · ซ่อนผลล่าสุด':'')+' (แตะเพื่อรีเฟรช)';
 }
 
 /* ============ Phase 2: ควรพกร่มไหม / ช่วงดีสุด / เตือนหนักมาก / 7 วัน ============ */
@@ -248,7 +252,7 @@ function renderPhase2(hs){
  if(run&&(!bestRun||run.n>bestRun.n))bestRun=run;
  const noRainToday=todaySlots.length>0&&!todaySlots.some(h=>(h.pc||0)>0);
  const best=$('best');best.hidden=false;
- if(noRainToday){best.className='pcard lv-ok';$('best-t').textContent='ทั้งวันนี้ไม่มีฝน';$('best-r').textContent='ออกไปข้างนอกเมื่อไหร่ก็สบาย ๆ'}
+ if(noRainToday){best.className='pcard lv-ok';$('best-t').textContent='ที่เหลือของวันนี้ไม่มีฝน';$('best-r').textContent='ออกไปข้างนอกเมื่อไหร่ก็สบาย ๆ'}
  else if(bestRun&&bestRun.n>=2){best.className='pcard lv-ok';
   const endT=(bestRun.s+bestRun.n*36e5);
   $('best-t').textContent='ช่วงดีที่สุด: '+fmtRange(bestRun.s)+' ถึง '+String(bkkH(endT)).padStart(2,'0')+':00 น.';
@@ -274,26 +278,31 @@ function renderPhase2(hs){
  wkh.hidden=false;
  const D=cur.d;
  let wetDays=0,mm7=0;
- for(let i=0;i<D.time.length;i++){if((D.sum[i]||0)>0)wetDays++;mm7+=D.sum[i]||0}
+ for(let i=0;i<D.time.length;i++){if((D.sum[i]||0)>=1)wetDays++;mm7+=D.sum[i]||0} // วันฝน = ฝน ≥1 มม. (ไม่นับ 0.1 มม. ปรอยเดียว)
  $('wk-sub').textContent='ฝนรวม ~'+Math.round(mm7)+' มม. · มีฝน '+wetDays+' จาก 7 วัน';
  // นับชั่วโมงฝนจากข้อมูลรายชั่วโมง (pc>=0.2)
  const cnt={};
  for(let i=0;i<cur.h.time.length;i++){if((cur.h.pc[i]||0)>=0.2)cnt[bkkDay(cur.h.time[i])]=(cnt[bkkDay(cur.h.time[i])]||0)+1}
  const fDow2=new Intl.DateTimeFormat('th-TH',{timeZone:BKK,weekday:'short'});
- wk.replaceChildren(...D.time.map((t,i)=>{
+ const todayD=bkkDay(Date.now()/1000);
+ const vis=D.time.map((t,i)=>i).filter(i=>bkkDay(D.time[i])>=todayD); // ซ่อนวันที่ผ่านไปแล้ว (cache เก่า)
+ wk.replaceChildren(...vis.map((i,k)=>{
+  const t=D.time[i];
   const d=document.createElement('div');
   const dowS=fDow2.format(new Date(t*1000));
   const we=(dowS==='ส.'||dowS==='อา.');
   d.className='h dw'+(we?' we':'')+((D.sum[i]||0)>=10?' wet':'');
-  const dow=document.createElement('div');dow.className='dw-t';dow.textContent=i===0?'วันนี้':i===1?'พรุ่งนี้':dowS;
+  const dow=document.createElement('div');dow.className='dw-t';dow.textContent=k===0?'วันนี้':k===1?'พรุ่งนี้':dowS;
   const dn=document.createElement('span');dn.className='dw-d';dn.textContent=+fDay.format(new Date(t*1000));dow.appendChild(dn);
-  const ic=document.createElement('div');ic.className='ic';ic.textContent=SKY_ICON[grp(D.code[i])?grp(D.code[i]):'cloudy'][0];
+  let g=grp(D.code[i]);if((D.sum[i]||0)<1&&(g==='rain'||g==='drizzle'))g='cloudy'; // ฝนเล็กน้อยให้โชว์เมฆ ไม่โชว์ฝน
+  const ic=document.createElement('div');ic.className='ic';ic.textContent=(SKY_ICON[g]||SKY_ICON.cloudy)[0];
   const tp=document.createElement('div');tp.className='tp';tp.innerHTML=(D.tmax[i]==null?'—':Math.round(D.tmax[i]))+'°<small> / '+(D.tmin[i]==null?'—':Math.round(D.tmin[i]))+'°</small>';
   const pp=document.createElement('span');
   if(D.pp[i]!=null){pp.className='pp '+(D.pp[i]>=60?'hi':D.pp[i]>=30?'md':'lo');pp.textContent='💧'+D.pp[i]+'%'}
   const mm=document.createElement('div');mm.className='mm';mm.textContent=(D.sum[i]!=null&&D.sum[i]>0)?D.sum[i]+' มม.':'';
-  const hr=document.createElement('div');hr.className='hr';hr.textContent=(cnt[+fDay.format(new Date(t*1000))]||0)>0?('☔'+(cnt[+fDay.format(new Date(t*1000))]||0)+' ชม.'):'';
-  d.append(dow,ic,tp,pp,mm,hr);d.style.animationDelay=(i*0.04)+'s';
+  let nh=D.hours?D.hours[i]:cnt[+fDay.format(new Date(t*1000))]; // ชั่วโมงที่มีฝน (API ให้มาเลย หรือนับเอง)
+  const hr=document.createElement('div');hr.className='hr';hr.textContent=(nh||0)>0?('☔'+nh+' ชม.'):'';
+  d.append(dow,ic,tp,pp,mm,hr);d.style.animationDelay=(k*0.04)+'s';
   return d;
  }));
 }
@@ -304,21 +313,25 @@ async function load(lat,lon,name,scroll){
  if(map){try{if(mk)mk.setLatLng([lat,lon]);else mk=L.circleMarker([lat,lon],{radius:9,color:'#fff',weight:3,fillColor:'#1D6FD1',fillOpacity:1}).addTo(map)}catch(e){}}
  $('upd').classList.add('spin');
  try{
-  const base='?latitude='+lat+'&longitude='+lon+'&timezone=Asia%2FBangkok&timeformat=unixtime&';
-  const [r1,r2]=await Promise.all([
-   fetch(API+base+'forecast_days=7&hourly=precipitation_probability,precipitation,weathercode,temperature_2m,cloud_cover,is_day'),
-   fetch(API+base+'forecast_days=7&daily=weathercode,precipitation_sum,precipitation_probability_max,temperature_2m_max,temperature_2m_min')]);
+  const base='?latitude='+lat+'&longitude='+lon+'&timezone=Asia%2FBangkok&timeformat=unixtime&forecast_days=7&';
+  const [h1,h2]=await Promise.allSettled([ // รายวันพังได้ รายชั่วโมงต้องรอด
+   fetch(API+base+'hourly=precipitation_probability,precipitation,weathercode,temperature_2m,is_day'),
+   fetch(API+base+'daily=weathercode,precipitation_sum,precipitation_hours,precipitation_probability_max,temperature_2m_max,temperature_2m_min')]);
+  if(h1.status!=='fulfilled')throw h1.reason;
+  const r1=h1.value;
   if(!r1.ok)throw new Error('HTTP '+r1.status);
   const j1=await r1.json(),H=j1.hourly;
   if(!H||!H.time||H.time.length<10)throw new Error('ข้อมูลว่าง');
   let D=null;
-  if(r2.ok){try{const j2=await r2.json();const Dd=j2.daily;
-   if(Dd&&Dd.time)D={time:Dd.time,code:Dd.weathercode,sum:Dd.precipitation_sum,pp:Dd.precipitation_probability_max,tmax:Dd.temperature_2m_max,tmin:Dd.temperature_2m_min}}catch(e){}}
+  if(h2.status==='fulfilled'&&h2.value.ok){try{const j2=await h2.value.json(),Dd=j2.daily;
+   if(Dd&&Dd.time)D={time:Dd.time,code:Dd.weathercode,sum:Dd.precipitation_sum,hours:Dd.precipitation_hours,pp:Dd.precipitation_probability_max,tmax:Dd.temperature_2m_max,tmin:Dd.temperature_2m_min}}catch(e){}}
   if(my!==reqId)return my;
-  cur={lat,lon,name,ts:Date.now(),
-   h:{time:H.time,pp:H.precipitation_probability,pc:H.precipitation,code:H.weathercode,temp:H.temperature_2m,cloud:H.cloud_cover,isday:H.is_day},
+  const hdr=r1.headers.get('date'); // อายุข้อมูลจริงจากเซิร์ฟเวอร์ ไม่ใช่เวลาที่เปิดแอป (แก้ SW cache ออฟไลน์)
+  cur={lat,lon,name,ts:hdr?Date.parse(hdr):Date.now(),
+   h:{time:H.time,pp:H.precipitation_probability,pc:H.precipitation,code:H.weathercode,temp:H.temperature_2m,isday:H.is_day},
    d:D};
   try{localStorage.setItem('raindata',JSON.stringify(cur));localStorage.setItem('rainloc',JSON.stringify({lat,lon,name}))}catch(e){}
+  wantScroll=!!scroll; // เลื่อนไทม์ไลน์กลับซ้ายเฉพาะตอนผู้ใช้เลือกจุดใหม่เอง
   render();
   if(scroll)scrollTo({top:0,behavior:'smooth'});
  }catch(e){
